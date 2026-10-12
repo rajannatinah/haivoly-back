@@ -13,8 +13,8 @@ import { SyncStatus } from '../../common/enums/domain.enums';
 import { Utilisateur } from '../../users/entities/utilisateur.entity';
 
 @Entity({ name: 'Action' })
+@Index('Action_userId_clientId_key', ['userId', 'clientId'], { unique: true })
 export class Action extends BaseEntity {
-  @Index('Action_clientId_key', { unique: true })
   @Column({ type: 'text', name: 'clientId', nullable: true })
   clientId: string | null;
 

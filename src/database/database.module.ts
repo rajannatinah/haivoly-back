@@ -11,6 +11,14 @@ import { buildDataSourceOptions } from './data-source';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
+        const synchronize = config.get<string>('DB_SYNCHRONIZE') === 'true';
+        const environment = config.get<string>('NODE_ENV') ?? process.env.NODE_ENV;
+        if (environment === 'production' && synchronize) {
+          throw new Error(
+            'Configuration de base de données invalide : DB_SYNCHRONIZE ne peut jamais être activé en production; exécutez les migrations TypeORM.',
+          );
+        }
+
         const options = buildDataSourceOptions({
           ...process.env,
           DATABASE_URL:
@@ -23,8 +31,8 @@ import { buildDataSourceOptions } from './data-source';
         return {
           ...options,
           // `false` en production : le schéma est piloté par les migrations.
-          // `DB_SYNCHRONIZE=true` reste possible pour un environnement jetable.
-          synchronize: config.get<string>('DB_SYNCHRONIZE') === 'true',
+          // Le contrôle ci-dessus interdit explicitement l'option en production.
+          synchronize,
         };
       },
       dataSourceFactory: async (options) => {

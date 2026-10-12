@@ -45,12 +45,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (status >= Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
       this.logger.error(
-        `[${request.requestId ?? '-'}] ${request.method} ${request.url} -> ${status} ${message}`,
+        `[${request.requestId ?? '-'}] ${request.method} ${request.path} -> ${status} ${message}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     } else {
       this.logger.warn(
-        `[${request.requestId ?? '-'}] ${request.method} ${request.url} -> ${status} ${message}`,
+        `[${request.requestId ?? '-'}] ${request.method} ${request.path} -> ${status} ${message}`,
       );
     }
 
@@ -61,7 +61,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       errorCode: code,
       ...(fields?.length ? { fields } : {}),
       ...(details ? { details } : {}),
-      path: request.url,
+      path: request.path,
       statusCode: status,
       timestamp: new Date().toISOString(),
     };

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -65,15 +65,33 @@ export class SynchronizationService {
 
   async synchronize(userId: string, dto: SyncDto): Promise<SyncResponse> {
     const results: SyncActionResult[] = [];
+    const identifiantsLocaux = new Map<string, string>();
 
+    // Les actions restent dans l'ordre de création. Cela permet aux opérations
+    // dépendantes de résoudre l'identifiant temporaire d'un parent créé plus tôt
+    // dans le même lot, sans jamais faire confiance à un userId du client.
     for (const action of dto.actions ?? []) {
-      results.push(await this.applyAction(userId, action, dto.deviceId));
+      const resolue = this.resoudreReferencesLocales(action, identifiantsLocaux);
+      const resultat = await this.applyAction(userId, resolue, dto.deviceId);
+      results.push(resultat);
+
+      if (
+        action.actionType === 'CREATE' &&
+        action.entityId &&
+        resultat.entityId &&
+        (resultat.status === 'SYNCED' || resultat.status === 'DUPLICATE')
+      ) {
+        identifiantsLocaux.set(action.entityId, resultat.entityId);
+      }
     }
 
     const synced = results.filter((r) => r.status === 'SYNCED').length;
     const duplicates = results.filter((r) => r.status === 'DUPLICATE').length;
     const failed = results.filter(
-      (r) => r.status === 'FAILED' || r.status === 'INVALID',
+      (r) =>
+        r.status === 'FAILED' ||
+        r.status === 'INVALID' ||
+        r.status === 'CONFLICT',
     ).length;
 
     return {
@@ -81,6 +99,28 @@ export class SynchronizationService {
       syncedAt: new Date().toISOString(),
       summary: { total: results.length, synced, duplicates, failed },
       changes: await this.pullChanges(userId, dto.lastSync),
+    };
+  }
+
+  private resoudreReferencesLocales(
+    action: CreateActionDto,
+    identifiants: Map<string, string>,
+  ): CreateActionDto {
+    const resoudre = (value: string | undefined): string | undefined =>
+      value ? identifiants.get(value) ?? value : value;
+    const payload = action.payload ? { ...action.payload } : undefined;
+
+    if (payload) {
+      for (const key of ['id', 'entityId', 'parcelleId', 'parcelle_id', 'cultureId']) {
+        const value = payload[key];
+        if (typeof value === 'string') payload[key] = resoudre(value);
+      }
+    }
+
+    return {
+      ...action,
+      entityId: resoudre(action.entityId),
+      ...(payload ? { payload } : {}),
     };
   }
 
@@ -99,7 +139,9 @@ export class SynchronizationService {
     };
 
     // ── 1. Idempotence : l'action a-t-elle déjà été traitée ? ──
-    const existing = await this.actions.findOne({ where: { clientId } });
+    // L'idempotence est strictement liée à l'utilisateur authentifié; une
+    // collision de clientId entre comptes ne doit jamais révéler une action.
+    const existing = await this.actions.findOne({ where: { clientId, userId } });
 
     if (existing && existing.syncStatus === String(SyncStatus.SYNCED)) {
       return {
@@ -142,11 +184,24 @@ export class SynchronizationService {
             retryCount: 0,
           }),
         );
-      } catch {
-        // Violation d'unicité : une requête concurrente a déjà réservé la clé.
+      } catch (error) {
+        const erreur = error as {
+          code?: unknown;
+          driverError?: { code?: unknown };
+        };
+        const code = erreur.driverError?.code ?? erreur.code;
+        if (code !== '23505') throw error;
+
+        // Une requête concurrente peut avoir réservé cette clé entre la
+        // lecture et l'insertion; ne renvoyer que la ligne du même utilisateur.
+        const concurrente = await this.actions.findOne({
+          where: { clientId, userId },
+        });
+        if (!concurrente) throw error;
         return {
           ...base,
           status: 'DUPLICATE',
+          entityId: concurrente.entityId ?? undefined,
           message: 'Action déjà enregistrée',
         };
       }
@@ -189,8 +244,17 @@ export class SynchronizationService {
       };
     } catch (error) {
       const message = this.describeError(error);
+      const httpStatus = error instanceof HttpException ? error.getStatus() : 0;
+      const status: SyncActionStatus =
+        httpStatus === 409
+          ? 'CONFLICT'
+          : [400, 401, 403, 404, 413, 415, 422].includes(httpStatus)
+            ? 'INVALID'
+            : 'FAILED';
 
-      journalEntry.syncStatus = SyncStatus.FAILED;
+      journalEntry.syncStatus =
+        status === 'CONFLICT' ? 'CONFLICT' :
+          status === 'INVALID' ? 'INVALID' : SyncStatus.FAILED;
       journalEntry.metadata = {
         ...(journalEntry.metadata ?? {}),
         error: message,
@@ -198,10 +262,10 @@ export class SynchronizationService {
       await this.actions.save(journalEntry);
 
       this.logger.warn(
-        `[sync] échec ${action.actionType} ${action.entityType} (${clientId}) : ${message}`,
+        `[sync] ${status.toLowerCase()} ${action.actionType} ${action.entityType} (${clientId})`,
       );
 
-      return { ...base, status: 'FAILED', message };
+      return { ...base, status, message };
     }
   }
 

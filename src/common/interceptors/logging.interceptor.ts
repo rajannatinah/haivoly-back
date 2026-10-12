@@ -39,7 +39,9 @@ export class LoggingInterceptor implements NestInterceptor {
   ): void {
     const duration = Date.now() - startedAt;
     const userId = request.user?.id ?? 'anonymous';
-    const line = `[${request.requestId ?? '-'}] ${request.method} ${request.originalUrl} ${status} ${duration}ms user=${userId}`;
+    // Ne journalise que le chemin, jamais les paramètres de requête qui peuvent
+    // contenir des jetons, adresses e-mail ou autres données sensibles.
+    const line = `[${request.requestId ?? '-'}] ${request.method} ${request.path} ${status} ${duration}ms user=${userId}`;
 
     if (status >= 500) {
       this.logger.error(line);

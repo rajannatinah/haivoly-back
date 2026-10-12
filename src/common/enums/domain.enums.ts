@@ -42,6 +42,8 @@ export enum SyncStatus {
   SYNCED = 'SYNCED',
   FAILED = 'FAILED',
   DUPLICATE = 'DUPLICATE',
+  INVALID = 'INVALID',
+  CONFLICT = 'CONFLICT',
 }
 
 export enum RecommendationType {

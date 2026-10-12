@@ -41,6 +41,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     user: unknown,
     info: unknown,
   ): TUser {
+    // Conserver les refus métier explicites de la stratégie (notamment
+    // AUTH_EMAIL_NOT_VERIFIED) au lieu de les transformer en 401 générique.
+    if (err instanceof ApiException) throw err;
+
     const texte = infoTexte(info);
     const absent = !info || /no\s*auth\s*token/i.test(texte);
     const expire = /TokenExpiredError|jwt expired/i.test(texte);

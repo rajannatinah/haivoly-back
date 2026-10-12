@@ -3,6 +3,7 @@ import {
   ConflictException,
   HttpStatus,
   Injectable,
+  InternalServerErrorException,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -104,7 +105,7 @@ export class AuthService {
 
   async register(
     dto: RegisterDto,
-  ): Promise<PublicUtilisateur & { message: string; _devToken?: string }> {
+  ): Promise<PublicUtilisateur & { message: string; emailEnvoye?: boolean }> {
     const email = normaliserEmail(dto.email);
 
     // Le backend est la source de vérité : la vérification frontend n'est
@@ -132,75 +133,68 @@ export class AuthService {
       throw new ConflictException('Cet email est déjà utilisé');
     }
 
+    const verificationRequise = this.verificationRequise;
     const utilisateur = this.utilisateurs.create({
       nom: dto.nom.trim(),
       prenom: dto.prenom?.trim() ?? null,
       email,
       telephone: dto.telephone?.trim() ?? null,
       password: await bcrypt.hash(dto.password, BCRYPT_ROUNDS),
-      estVerifie: false,
-      emailVerifieA: null,
+      estVerifie: !verificationRequise,
+      emailVerifieA: verificationRequise ? null : new Date(),
     });
 
     const saved = await this.utilisateurs.save(utilisateur);
-    this.logger.log(`[register] Nouvel utilisateur ${saved.id}`);
+    this.logger.log(`[register] Compte créé (${saved.id}).`);
 
-    const rawToken = await this.emettreVerification(saved);
+    const emailEnvoye = verificationRequise
+      ? await this.emettreVerification(saved)
+      : false;
 
-    const reponse = {
+    return {
       ...this.toPublic(saved),
-      message:
-        'Compte créé. Un e-mail de confirmation vient de vous être envoyé : ouvrez-le pour activer votre compte.',
+      message: !verificationRequise
+        ? 'Compte créé. Vous pouvez vous connecter.'
+        : emailEnvoye
+          ? 'Compte créé. Consultez votre boîte de réception pour confirmer votre adresse e-mail.'
+          : 'Compte créé, mais le message de confirmation n’a pas pu être transmis. Vous pourrez demander un nouvel envoi.',
+      ...(verificationRequise ? { emailEnvoye } : {}),
     };
-
-    // Hors production : le jeton est retourné pour permettre la recette sans
-    // boîte mail réelle. Jamais exposé en production.
-    if (process.env.NODE_ENV !== 'production') {
-      return { ...reponse, _devToken: rawToken };
-    }
-
-    return reponse;
   }
 
-  /** Crée un jeton de vérification et envoie l'e-mail correspondant. */
+  /** Crée un jeton aléatoire, ne conserve que son hash et transmet le lien. */
   private async emettreVerification(
     utilisateur: Utilisateur,
-  ): Promise<string> {
-    // Un seul jeton actif par adresse.
-    await this.verificationTokens.update(
-      { email: utilisateur.email, used: false },
-      { used: true },
-    );
-
+  ): Promise<boolean> {
     const rawToken = crypto.randomBytes(32).toString('hex');
 
-    await this.verificationTokens.save(
-      this.verificationTokens.create({
-        email: utilisateur.email,
-        tokenHash: this.hashToken(rawToken),
-        expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
-        utilisateurId: utilisateur.id,
-      }),
-    );
-
-    const url = this.mailService.buildVerificationUrl(rawToken);
-
     try {
+      // Invalide tout ancien jeton avant d'émettre le nouveau.
+      await this.verificationTokens.update(
+        { email: utilisateur.email, used: false },
+        { used: true },
+      );
+      await this.verificationTokens.save(
+        this.verificationTokens.create({
+          email: utilisateur.email,
+          tokenHash: this.hashToken(rawToken),
+          expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
+          utilisateurId: utilisateur.id,
+        }),
+      );
+
+      const url = this.mailService.buildVerificationUrl(rawToken);
       await this.mailService.envoyerVerificationEmail(
         utilisateur.email,
         url,
         VERIFICATION_TOKEN_TTL_MIN,
       );
-    } catch (error) {
-      // L'échec d'envoi ne doit pas annuler la création du compte :
-      // l'utilisateur peut redemander l'e-mail.
-      this.logger.error(
-        `[register] envoi de l'e-mail de vérification en échec pour ${utilisateur.email}`,
-        error,
-      );
+      return true;
+    } catch {
+      // Le jeton, l'adresse, l'URL et les détails SMTP ne sont jamais journalisés.
+      this.logger.error('Émission du message de confirmation impossible.');
+      return false;
     }
-
-    return rawToken;
   }
 
   /** Confirme la possession de l'adresse à partir du jeton reçu. */
@@ -246,12 +240,35 @@ export class AuthService {
     }
 
     await this.verificationTokens.manager.transaction(async (manager) => {
-      await manager.update(
+      // Consommation conditionnelle : deux confirmations concurrentes ne
+      // peuvent pas utiliser le même jeton deux fois.
+      const consommation = await manager.update(
+        EmailVerificationToken,
+        { id: stocke.id, used: false },
+        { used: true },
+      );
+      if (consommation?.affected === 0) {
+        throw new ApiException(
+          ErrorCode.AUTH_VERIFICATION_USED,
+          'Ce lien de vérification a déjà été utilisé.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const miseAJour = await manager.update(
         Utilisateur,
         { id: utilisateur.id },
         { estVerifie: true, emailVerifieA: new Date() },
       );
-      // Usage unique : tous les jetons de l'adresse sont consommés.
+      if (miseAJour?.affected === 0) {
+        throw new ApiException(
+          ErrorCode.AUTH_VERIFICATION_INVALID,
+          'Ce lien de vérification est invalide.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Invalidation de tous les autres jetons de cette adresse.
       await manager.update(
         EmailVerificationToken,
         { email: stocke.email, used: false },
@@ -259,7 +276,7 @@ export class AuthService {
       );
     });
 
-    this.logger.log(`[verify-email] adresse confirmée (${stocke.email})`);
+    this.logger.log('[verify-email] Confirmation d’adresse terminée.');
 
     return {
       message:
@@ -273,48 +290,39 @@ export class AuthService {
    * Réponse identique que le compte existe ou non (anti-énumération), avec un
    * délai minimal entre deux envois pour la même adresse.
    */
-  async resendVerification(
-    rawEmail: string,
-  ): Promise<{ message: string; _devToken?: string }> {
+  async resendVerification(rawEmail: string): Promise<{ message: string }> {
     const email = normaliserEmail(rawEmail);
+    // Réponse strictement identique pour une adresse inconnue, déjà confirmée,
+    // limitée par le délai ou éligible à un nouvel envoi.
     const generique = {
       message:
-        'Si un compte non confirmé est associé à cette adresse, un nouvel e-mail de vérification a été envoyé.',
+        'Si un compte non confirmé est associé à cette adresse, un message de confirmation sera envoyé.',
     };
 
     const utilisateur = await this.utilisateurs.findOne({ where: { email } });
-    if (!utilisateur) return generique;
-    if (utilisateur.estVerifie) {
-      return { message: 'Cette adresse e-mail est déjà confirmée.' };
-    }
+    if (!utilisateur || utilisateur.estVerifie) return generique;
 
     const dernier = await this.verificationTokens.findOne({
       where: { email },
       order: { createdAt: 'DESC' },
     });
 
+    // Le délai par adresse ne renvoie pas de 429 : cela révélerait l'existence
+    // d'un compte. Le contrôleur applique en parallèle une limite uniforme par IP.
     if (
-      dernier &&
+      dernier?.createdAt &&
       Date.now() - dernier.createdAt.getTime() < RESEND_COOLDOWN_MS
     ) {
-      throw new ApiException(
-        ErrorCode.AUTH_VERIFICATION_RESEND_LIMIT,
-        'Un e-mail vient de vous être envoyé. Patientez une minute avant de réessayer.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      return generique;
     }
 
-    const rawToken = await this.emettreVerification(utilisateur);
-
-    if (process.env.NODE_ENV !== 'production') {
-      return { ...generique, _devToken: rawToken };
-    }
-
+    await this.emettreVerification(utilisateur);
     return generique;
   }
 
   async login(dto: LoginDto): Promise<{
     access_token: string;
+    expires_at: string;
     utilisateur: PublicUtilisateur;
   }> {
     const email = dto.email.toLowerCase().trim();
@@ -350,7 +358,21 @@ export class AuthService {
 
     this.logger.log(`[login] ${utilisateur.id}`);
 
-    return { access_token, utilisateur: this.toPublic(utilisateur) };
+    const payload = this.jwtService.decode(access_token) as
+      | { exp?: number }
+      | null;
+
+    if (!payload?.exp || !Number.isFinite(payload.exp)) {
+      throw new InternalServerErrorException(
+        'La configuration de durée de session est invalide.',
+      );
+    }
+
+    return {
+      access_token,
+      expires_at: new Date(payload.exp * 1000).toISOString(),
+      utilisateur: this.toPublic(utilisateur),
+    };
   }
 
   logout(user: AuthenticatedUser): { message: string } {
@@ -382,9 +404,6 @@ export class AuthService {
     const utilisateur = await this.utilisateurs.findOne({ where: { email } });
 
     if (!utilisateur) {
-      this.logger.log(
-        `[forgot-password] email inexistant (${email}) → réponse générique`,
-      );
       await new Promise((resolve) => setTimeout(resolve, 400));
       return genericResponse;
     }
@@ -408,16 +427,9 @@ export class AuthService {
 
     try {
       await this.mailService.sendPasswordResetEmail(email, resetUrl);
-    } catch (error) {
-      this.logger.error(`Erreur envoi email reset pour ${email}`, error);
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      return {
-        ...genericResponse,
-        _devToken: rawToken,
-        _devResetUrl: resetUrl,
-      };
+    } catch {
+      // Ne pas écrire l'adresse, le lien, le jeton ou le détail SMTP dans les logs.
+      this.logger.error('Émission du message de réinitialisation impossible.');
     }
 
     return genericResponse;
@@ -481,9 +493,7 @@ export class AuthService {
       );
     });
 
-    this.logger.log(
-      `[reset-password] Mot de passe réinitialisé (${stored.email})`,
-    );
+    this.logger.log('[reset-password] Mot de passe réinitialisé.');
 
     return {
       message:

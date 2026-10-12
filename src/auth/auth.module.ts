@@ -24,12 +24,21 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') ?? 'change-me',
-        signOptions: {
-          expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '7d') as never,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.get<string>('JWT_SECRET');
+        const production = config.get<string>('NODE_ENV') === 'production';
+        if (production && (!secret || secret === 'change-me')) {
+          throw new Error(
+            'Configuration d’authentification invalide : JWT_SECRET doit être un secret fort en production.',
+          );
+        }
+        return {
+          secret: secret ?? 'change-me',
+          signOptions: {
+            expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '7d') as never,
+          },
+        };
+      },
     }),
   ],
   controllers: [AuthController],

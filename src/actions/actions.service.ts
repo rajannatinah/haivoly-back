@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThanOrEqual, Repository } from 'typeorm';
+import { In, MoreThanOrEqual, Repository } from 'typeorm';
 
 import { Action } from './entities/action.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
@@ -40,7 +40,7 @@ export class ActionsService {
   async create(userId: string, dto: CreateActionDto) {
     if (dto.clientId) {
       const existing = await this.actions.findOne({
-        where: { clientId: dto.clientId },
+        where: { clientId: dto.clientId, userId },
       });
 
       if (existing) {
@@ -146,7 +146,10 @@ export class ActionsService {
   /** Actions en échec de l'utilisateur (écran « synchronisation » mobile). */
   async failedForUser(userId: string): Promise<Action[]> {
     return this.actions.find({
-      where: { userId, syncStatus: SyncStatus.FAILED },
+      where: {
+        userId,
+        syncStatus: In([SyncStatus.FAILED, SyncStatus.INVALID, SyncStatus.CONFLICT]),
+      },
       order: { updatedAt: 'DESC' },
       take: 100,
     });
@@ -174,7 +177,11 @@ export class ActionsService {
             { syncStatus: SyncStatus.SYNCING },
           ],
         }),
-        this.actions.count({ where: { syncStatus: SyncStatus.FAILED } }),
+        this.actions.count({
+          where: {
+            syncStatus: In([SyncStatus.FAILED, SyncStatus.INVALID, SyncStatus.CONFLICT]),
+          },
+        }),
         this.recommendations.count(),
       ]);
 
