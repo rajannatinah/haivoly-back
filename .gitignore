@@ -59,3 +59,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Contenu téléversé par les utilisateurs (photos) : servi depuis le disque,
 # jamais versionné. Le dossier est recréé au démarrage (`app.setup.ts`).
 uploads/
+.env

@@ -4,17 +4,14 @@ import {
   HttpCode,
   HttpStatus,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 
 import { SynchronizationService } from './synchronization.service';
 import { SyncDto, BatchSyncDto } from '../actions/dto/batch-sync.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 @Controller('sync')
-@UseGuards(JwtAuthGuard)
 export class SynchronizationController {
   constructor(
     private readonly synchronizationService: SynchronizationService,
@@ -29,7 +26,6 @@ export class SynchronizationController {
 }
 
 @Controller('actions')
-@UseGuards(JwtAuthGuard)
 export class ActionsSyncAliasController {
   constructor(
     private readonly synchronizationService: SynchronizationService,

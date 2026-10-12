@@ -13,6 +13,8 @@ import {
   RecommendationQueryDto,
 } from './dto/recommendation.dto';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { Role } from '../common/enums/domain.enums';
 import { paginate } from '../common/dto/pagination.dto';
 import { parseDate } from '../common/utils/date.util';
 
@@ -159,13 +161,16 @@ export class RecommendationsService {
 
   async remove(
     id: string,
-    userId: string,
+    acteur: AuthenticatedUser,
   ): Promise<{ id: string; deleted: true }> {
     const recommendation = await this.recommendations.findOne({
       where: { id },
     });
 
-    if (!recommendation || recommendation.userId !== userId) {
+    const estDestinataire = recommendation?.userId === acteur.id;
+    const estProprietaire = acteur.role === Role.PROPRIETAIRE;
+
+    if (!recommendation || (!estDestinataire && !estProprietaire)) {
       throw new NotFoundException('Recommandation introuvable');
     }
 

@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { RecoltesService } from './recoltes.service';
+import { UsersService } from '../users/users.service';
 import { Recolte } from './entities/recolte.entity';
 import { PhotoRecolte } from '../photos-recoltes/entities/photo-recolte.entity';
 import { Culture } from '../cultures/entities/culture.entity';
@@ -34,6 +35,16 @@ describe('RecoltesService — règle métier transactionnelle', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         RecoltesService,
+        {
+          provide: UsersService,
+          useValue: {
+            // Portee par defaut = l'appelant seul : c'est le comportement
+            // AGRICULTEUR, celui que ces tests verifient.
+            porteeDeConsultation: jest
+              .fn()
+              .mockImplementation((id: string) => Promise.resolve([id])),
+          },
+        },
         { provide: getRepositoryToken(Recolte), useValue: recoltes },
         { provide: getRepositoryToken(Culture), useValue: cultures },
         {

@@ -6,9 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { Recolte } from './entities/recolte.entity';
+import { UsersService } from '../users/users.service';
 import { PhotoRecolte } from '../photos-recoltes/entities/photo-recolte.entity';
 import { Culture } from '../cultures/entities/culture.entity';
 import { StatutCulture } from '../common/enums/domain.enums';
@@ -23,6 +24,7 @@ export class RecoltesService {
   private readonly logger = new Logger(RecoltesService.name);
 
   constructor(
+    private readonly usersService: UsersService,
     @InjectRepository(Recolte)
     private readonly recoltes: Repository<Recolte>,
     @InjectRepository(Culture)
@@ -110,8 +112,10 @@ export class RecoltesService {
     page = 1,
     limit = 50,
   ): Promise<PaginatedResult<Recolte>> {
+    // Portee elargie pour un PROPRIETAIRE (cahier des charges §3, Annexe A).
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const [items, total] = await this.recoltes.findAndCount({
-      where: { culture: { parcelle: { utilisateurId } } },
+      where: { culture: { parcelle: { utilisateurId: In(portee) } } },
       relations: { culture: { parcelle: true }, photos: true },
       order: { dateRecolte: 'DESC' },
       skip: (Math.max(1, page) - 1) * Math.min(200, Math.max(1, limit)),

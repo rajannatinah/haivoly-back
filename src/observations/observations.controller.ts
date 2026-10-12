@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 
 import { ObservationsService } from './observations.service';
@@ -14,12 +13,10 @@ import {
   CreateObservationDto,
   UpdateObservationDto,
 } from './dto/observation.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class ObservationsController {
   constructor(private readonly observationsService: ObservationsService) {}
 

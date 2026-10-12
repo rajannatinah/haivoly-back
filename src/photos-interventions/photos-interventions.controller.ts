@@ -8,7 +8,6 @@ import {
   Patch,
   Post,
   UploadedFile,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -18,7 +17,6 @@ import {
   CreatePhotoInterventionDto,
   UpdatePhotoInterventionDto,
 } from './dto/photo-intervention.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { imageUploadOptions } from '../common/utils/upload.util';
@@ -33,7 +31,6 @@ interface UploadedImage {
 const uploadOptions = imageUploadOptions('interventions', 'intervention');
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class PhotosInterventionsController {
   constructor(
     private readonly photosInterventionsService: PhotosInterventionsService,

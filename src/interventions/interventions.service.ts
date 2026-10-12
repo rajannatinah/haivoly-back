@@ -5,9 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import {In, Repository } from 'typeorm';
 
 import { Intervention } from './entities/intervention.entity';
+import { UsersService } from '../users/users.service';
 import { Culture } from '../cultures/entities/culture.entity';
 import { StatutCulture } from '../common/enums/domain.enums';
 import {
@@ -25,6 +26,7 @@ export class InterventionsService {
   private readonly logger = new Logger(InterventionsService.name);
 
   constructor(
+    private readonly usersService: UsersService,
     @InjectRepository(Intervention)
     private readonly interventions: Repository<Intervention>,
     @InjectRepository(Culture)
@@ -36,11 +38,12 @@ export class InterventionsService {
     cultureId: string,
     utilisateurId: string,
   ): Promise<Culture> {
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const culture = await this.cultures.findOne({
       where: {
         id: cultureId,
         ...(parcelleIdFromRoute ? { parcelleId: parcelleIdFromRoute } : {}),
-        parcelle: { utilisateurId },
+        parcelle: { utilisateurId: In(portee) },
       },
     });
 

@@ -21,6 +21,7 @@ import { SynchronizationModule } from './synchronization/synchronization.module'
 import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -54,6 +55,9 @@ import { RolesGuard } from './auth/guards/roles.guard';
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Ordre impératif : l'authentification doit renseigner `request.user`
+    // AVANT que le RolesGuard ne lise le rôle.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })

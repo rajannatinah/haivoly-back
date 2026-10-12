@@ -1,8 +1,10 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 
 import { ApiException } from '../../common/errors/api-error';
 import { ErrorCode } from '../../common/errors/error-codes';
+import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 
 /** Texte exploitable extrait de l'information fournie par `passport-jwt`. */
 function infoTexte(info: unknown): string {
@@ -11,8 +13,29 @@ function infoTexte(info: unknown): string {
   return '';
 }
 
+/**
+ * Garde d'authentification enregistré globalement (APP_GUARD).
+ *
+ * Il doit s'exécuter AVANT le `RolesGuard` : sans cela `request.user` n'est
+ * pas encore renseigné et le contrôle des rôles échoue systématiquement.
+ */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private readonly reflector: Reflector) {
+    super();
+  }
+
+  canActivate(context: ExecutionContext) {
+    const estPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (estPublic) return true;
+
+    return super.canActivate(context);
+  }
+
   handleRequest<TUser = unknown>(
     err: unknown,
     user: unknown,

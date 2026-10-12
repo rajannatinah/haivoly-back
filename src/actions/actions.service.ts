@@ -121,13 +121,22 @@ export class ActionsService {
     return paginate(items, total, page, limit);
   }
 
-  async findOne(id: string): Promise<Action> {
+  async findOne(
+    id: string,
+    demandeur?: { id: string; role?: string },
+  ): Promise<Action> {
     const action = await this.actions.findOne({
       where: { id },
       relations: { utilisateur: true },
     });
 
-    if (!action) {
+    // Pas de divulgation de l'existence de la ressource à un non-propriétaire.
+    const autorise =
+      !demandeur ||
+      demandeur.role === 'PROPRIETAIRE' ||
+      action?.userId === demandeur.id;
+
+    if (!action || !autorise) {
       throw new NotFoundException('Action introuvable');
     }
 

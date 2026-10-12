@@ -7,7 +7,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsOptional, ValidateNested } from 'class-validator';
@@ -16,7 +15,6 @@ import { CulturesService } from './cultures.service';
 import { CreateCultureDto } from './dto/creation-culture.dto';
 import { UpdateCultureDto } from './dto/modification-culture.dto';
 import { PointGPSCultureInputDto } from './dto/creation-culture.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
@@ -41,7 +39,6 @@ class ListeCulturesQueryDto extends PaginationQueryDto {
 }
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class CulturesController {
   constructor(private readonly culturesService: CulturesService) {}
 

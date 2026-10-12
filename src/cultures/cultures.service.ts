@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { Culture } from './entities/culture.entity';
+import { UsersService } from '../users/users.service';
 import { PointGPSCulture } from './entities/point-gps-culture.entity';
 import { Parcelle } from '../parcelles/entities/parcelle.entity';
 import { Recolte } from '../recoltes/entities/recolte.entity';
@@ -35,6 +36,7 @@ const TRANSITIONS_AUTORISEES: Record<StatutCulture, StatutCulture[]> = {
 export class CulturesService {
   private readonly logger = new Logger(CulturesService.name);
   constructor(
+    private readonly usersService: UsersService,
     @InjectRepository(Culture)
     private readonly cultures: Repository<Culture>,
     @InjectRepository(PointGPSCulture)
@@ -47,11 +49,14 @@ export class CulturesService {
     utilisateurId: string,
     options: { parcelleId?: string; includeDeleted?: boolean } = {},
   ): Promise<Culture> {
+    // Portee elargie : un PROPRIETAIRE accede aux cultures de ses agriculteurs
+    // rattaches (cahier des charges §3 et Annexe A, controle serveur = filtrage).
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const culture = await this.cultures.findOne({
       where: {
         id: cultureId,
         ...(options.parcelleId ? { parcelleId: options.parcelleId } : {}),
-        parcelle: { utilisateurId },
+        parcelle: { utilisateurId: In(portee) },
       },
       relations: { parcelle: true },
     });
@@ -123,8 +128,10 @@ export class CulturesService {
     page = 1,
     limit = 50,
   ): Promise<PaginatedResult<Culture>> {
+    const porteeListe =
+      await this.usersService.porteeDeConsultation(utilisateurId);
     const parcelle = await this.cultures.manager.findOne(Parcelle, {
-      where: { id: parcelleId, utilisateurId },
+      where: { id: parcelleId, utilisateurId: In(porteeListe) },
     });
     if (!parcelle) {
       throw new NotFoundException('Parcelle introuvable');
@@ -145,9 +152,11 @@ export class CulturesService {
     limit = 50,
     statut?: StatutCulture,
   ): Promise<PaginatedResult<Culture>> {
+    // Portee elargie pour un PROPRIETAIRE (cahier des charges §3, Annexe A).
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const [items, total] = await this.cultures.findAndCount({
       where: {
-        parcelle: { utilisateurId },
+        parcelle: { utilisateurId: In(portee) },
         ...(statut ? { statut } : {}),
       },
       relations: { parcelle: true, recolte: true },

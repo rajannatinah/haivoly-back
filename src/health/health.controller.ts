@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { Public } from '../common/decorators/public.decorator';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -10,6 +11,7 @@ interface HealthPayload {
 }
 
 @Controller('health')
+@Public()
 export class HealthController {
   constructor(
     @InjectDataSource()

@@ -5,12 +5,12 @@ import {
   Param,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import { ActionsService } from './actions.service';
 import { CreateActionDto } from './dto/create-action.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/domain.enums';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
@@ -25,7 +25,6 @@ class ActionQueryDto extends PaginationQueryDto {
 }
 
 @Controller('actions')
-@UseGuards(JwtAuthGuard)
 export class ActionsController {
   constructor(private readonly actionsService: ActionsService) {}
 
@@ -34,7 +33,9 @@ export class ActionsController {
     return this.actionsService.create(user.id, dto);
   }
 
+  /** Statistiques globales de la plateforme : réservées au propriétaire. */
   @Get('stats/dashboard')
+  @Roles(Role.PROPRIETAIRE)
   stats() {
     return this.actionsService.stats();
   }
@@ -49,16 +50,17 @@ export class ActionsController {
     @Query() query: ActionQueryDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    const estProprietaire = user.role === Role.PROPRIETAIRE;
+
     return this.actionsService.findAll({
       ...query,
       search: query.q ?? query.search,
-      // Un utilisateur ne voit que ses propres actions.
-      userId: user.id,
+      userId: estProprietaire ? query.userId : user.id,
     });
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.actionsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.actionsService.findOne(id, user);
   }
 }

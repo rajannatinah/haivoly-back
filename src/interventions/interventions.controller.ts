@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 
 import { InterventionsService } from './interventions.service';
@@ -14,12 +13,10 @@ import {
   CreateInterventionDto,
   UpdateInterventionDto,
 } from './dto/intervention.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class InterventionsController {
   constructor(private readonly interventionsService: InterventionsService) {}
 

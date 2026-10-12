@@ -8,7 +8,6 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import { ParcellesService } from './parcelles.service';
@@ -21,7 +20,6 @@ import {
 } from './dto/delimitation.dto';
 
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { StatutParcelle } from '../common/enums/domain.enums';
@@ -34,7 +32,6 @@ class ListeParcellesQueryDto extends PaginationQueryDto {
 }
 
 @Controller('parcelles')
-@UseGuards(JwtAuthGuard)
 export class ParcellesController {
   constructor(private readonly parcellesService: ParcellesService) {}
 

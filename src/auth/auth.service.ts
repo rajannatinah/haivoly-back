@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
@@ -13,6 +15,14 @@ import { Repository } from 'typeorm';
 
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { ApiException } from '../common/errors/api-error';
+import { ErrorCode } from '../common/errors/error-codes';
+import {
+  normaliserEmail,
+  politiqueEmail,
+  validerEmailInscription,
+} from '../common/utils/politique-email.util';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { MailService } from './mail.service';
@@ -25,11 +35,22 @@ export interface PublicUtilisateur {
   email: string;
   telephone: string | null;
   role: string;
+  estVerifie: boolean;
   creeA: Date;
 }
 
 const BCRYPT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 heure
+const VERIFICATION_TOKEN_TTL_MIN = 60;
+const VERIFICATION_TOKEN_TTL_MS = VERIFICATION_TOKEN_TTL_MIN * 60 * 1000;
+/** Délai minimal entre deux renvois de l'e-mail de vérification. */
+const RESEND_COOLDOWN_MS = 60 * 1000;
+
+const MESSAGE_EMAIL_JETABLE =
+  'Les adresses e-mail temporaires ou jetables ne sont pas acceptées. Utilisez une adresse durable.';
+const MESSAGE_EMAIL_INVALIDE = 'Adresse e-mail invalide.';
+const MESSAGE_COMPTE_NON_VERIFIE =
+  'Votre adresse e-mail n’a pas encore été confirmée. Consultez votre boîte de réception (et vos courriers indésirables) pour activer votre compte.';
 
 @Injectable()
 export class AuthService {
@@ -42,7 +63,30 @@ export class AuthService {
     private readonly resetTokens: Repository<PasswordResetToken>,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    @InjectRepository(EmailVerificationToken)
+    private readonly verificationTokens: Repository<EmailVerificationToken>,
+    private readonly configService: ConfigService,
   ) {}
+
+  /** Politique e-mail configurable (voir politique-email.util). */
+  private get politique() {
+    return politiqueEmail({
+      EMAIL_BLOQUER_JETABLES: this.configService.get<string>(
+        'EMAIL_BLOQUER_JETABLES',
+      ),
+      EMAIL_DOMAINES_JETABLES_SUPPLEMENTAIRES: this.configService.get<string>(
+        'EMAIL_DOMAINES_JETABLES_SUPPLEMENTAIRES',
+      ),
+      EMAIL_DOMAINES_JETABLES_IGNORES: this.configService.get<string>(
+        'EMAIL_DOMAINES_JETABLES_IGNORES',
+      ),
+    });
+  }
+
+  private get verificationRequise(): boolean {
+    const brut = this.configService.get<string>('EMAIL_VERIFICATION_REQUISE');
+    return brut === undefined ? true : brut.toLowerCase() !== 'false';
+  }
 
   /** Ne jamais renvoyer le hash du mot de passe. */
   private toPublic(user: Utilisateur): PublicUtilisateur {
@@ -53,12 +97,35 @@ export class AuthService {
       email: user.email,
       telephone: user.telephone,
       role: user.role,
+      estVerifie: user.estVerifie,
       creeA: user.creeA,
     };
   }
 
-  async register(dto: RegisterDto): Promise<PublicUtilisateur> {
-    const email = dto.email.toLowerCase().trim();
+  async register(
+    dto: RegisterDto,
+  ): Promise<PublicUtilisateur & { message: string; _devToken?: string }> {
+    const email = normaliserEmail(dto.email);
+
+    // Le backend est la source de vérité : la vérification frontend n'est
+    // qu'un confort d'affichage.
+    const verdict = validerEmailInscription(email, this.politique);
+
+    if (verdict === 'EMAIL_INVALIDE') {
+      throw new ApiException(
+        ErrorCode.VALIDATION_INVALID_FORMAT,
+        MESSAGE_EMAIL_INVALIDE,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (verdict === 'EMAIL_JETABLE') {
+      throw new ApiException(
+        ErrorCode.AUTH_EMAIL_DISPOSABLE,
+        MESSAGE_EMAIL_JETABLE,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     const existing = await this.utilisateurs.findOne({ where: { email } });
     if (existing) {
@@ -71,12 +138,179 @@ export class AuthService {
       email,
       telephone: dto.telephone?.trim() ?? null,
       password: await bcrypt.hash(dto.password, BCRYPT_ROUNDS),
+      estVerifie: false,
+      emailVerifieA: null,
     });
 
     const saved = await this.utilisateurs.save(utilisateur);
     this.logger.log(`[register] Nouvel utilisateur ${saved.id}`);
 
-    return this.toPublic(saved);
+    const rawToken = await this.emettreVerification(saved);
+
+    const reponse = {
+      ...this.toPublic(saved),
+      message:
+        'Compte créé. Un e-mail de confirmation vient de vous être envoyé : ouvrez-le pour activer votre compte.',
+    };
+
+    // Hors production : le jeton est retourné pour permettre la recette sans
+    // boîte mail réelle. Jamais exposé en production.
+    if (process.env.NODE_ENV !== 'production') {
+      return { ...reponse, _devToken: rawToken };
+    }
+
+    return reponse;
+  }
+
+  /** Crée un jeton de vérification et envoie l'e-mail correspondant. */
+  private async emettreVerification(
+    utilisateur: Utilisateur,
+  ): Promise<string> {
+    // Un seul jeton actif par adresse.
+    await this.verificationTokens.update(
+      { email: utilisateur.email, used: false },
+      { used: true },
+    );
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+
+    await this.verificationTokens.save(
+      this.verificationTokens.create({
+        email: utilisateur.email,
+        tokenHash: this.hashToken(rawToken),
+        expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
+        utilisateurId: utilisateur.id,
+      }),
+    );
+
+    const url = this.mailService.buildVerificationUrl(rawToken);
+
+    try {
+      await this.mailService.envoyerVerificationEmail(
+        utilisateur.email,
+        url,
+        VERIFICATION_TOKEN_TTL_MIN,
+      );
+    } catch (error) {
+      // L'échec d'envoi ne doit pas annuler la création du compte :
+      // l'utilisateur peut redemander l'e-mail.
+      this.logger.error(
+        `[register] envoi de l'e-mail de vérification en échec pour ${utilisateur.email}`,
+        error,
+      );
+    }
+
+    return rawToken;
+  }
+
+  /** Confirme la possession de l'adresse à partir du jeton reçu. */
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const stocke = await this.verificationTokens.findOne({
+      where: { tokenHash: this.hashToken(token) },
+    });
+
+    if (!stocke) {
+      throw new ApiException(
+        ErrorCode.AUTH_VERIFICATION_INVALID,
+        'Ce lien de vérification est invalide.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (stocke.used) {
+      throw new ApiException(
+        ErrorCode.AUTH_VERIFICATION_USED,
+        'Ce lien de vérification a déjà été utilisé.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (stocke.expiresAt.getTime() < Date.now()) {
+      throw new ApiException(
+        ErrorCode.AUTH_VERIFICATION_EXPIRED,
+        'Ce lien de vérification a expiré. Demandez un nouvel envoi.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const utilisateur = await this.utilisateurs.findOne({
+      where: { email: stocke.email },
+    });
+
+    if (!utilisateur) {
+      throw new ApiException(
+        ErrorCode.AUTH_VERIFICATION_INVALID,
+        'Compte associé introuvable.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.verificationTokens.manager.transaction(async (manager) => {
+      await manager.update(
+        Utilisateur,
+        { id: utilisateur.id },
+        { estVerifie: true, emailVerifieA: new Date() },
+      );
+      // Usage unique : tous les jetons de l'adresse sont consommés.
+      await manager.update(
+        EmailVerificationToken,
+        { email: stocke.email, used: false },
+        { used: true },
+      );
+    });
+
+    this.logger.log(`[verify-email] adresse confirmée (${stocke.email})`);
+
+    return {
+      message:
+        'Votre adresse e-mail est confirmée. Vous pouvez maintenant vous connecter.',
+    };
+  }
+
+  /**
+   * Renvoie l'e-mail de vérification.
+   *
+   * Réponse identique que le compte existe ou non (anti-énumération), avec un
+   * délai minimal entre deux envois pour la même adresse.
+   */
+  async resendVerification(
+    rawEmail: string,
+  ): Promise<{ message: string; _devToken?: string }> {
+    const email = normaliserEmail(rawEmail);
+    const generique = {
+      message:
+        'Si un compte non confirmé est associé à cette adresse, un nouvel e-mail de vérification a été envoyé.',
+    };
+
+    const utilisateur = await this.utilisateurs.findOne({ where: { email } });
+    if (!utilisateur) return generique;
+    if (utilisateur.estVerifie) {
+      return { message: 'Cette adresse e-mail est déjà confirmée.' };
+    }
+
+    const dernier = await this.verificationTokens.findOne({
+      where: { email },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (
+      dernier &&
+      Date.now() - dernier.createdAt.getTime() < RESEND_COOLDOWN_MS
+    ) {
+      throw new ApiException(
+        ErrorCode.AUTH_VERIFICATION_RESEND_LIMIT,
+        'Un e-mail vient de vous être envoyé. Patientez une minute avant de réessayer.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const rawToken = await this.emettreVerification(utilisateur);
+
+    if (process.env.NODE_ENV !== 'production') {
+      return { ...generique, _devToken: rawToken };
+    }
+
+    return generique;
   }
 
   async login(dto: LoginDto): Promise<{
@@ -96,6 +330,16 @@ export class AuthService {
     );
     if (!passwordValid) {
       throw new UnauthorizedException('Email ou mot de passe incorrect');
+    }
+
+    // Vérifié après le contrôle du mot de passe : on ne révèle pas l'état de
+    // vérification d'un compte dont on ne connaît pas le secret.
+    if (this.verificationRequise && !utilisateur.estVerifie) {
+      throw new ApiException(
+        ErrorCode.AUTH_EMAIL_NOT_VERIFIED,
+        MESSAGE_COMPTE_NON_VERIFIE,
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     const access_token = await this.jwtService.signAsync({
@@ -254,6 +498,17 @@ export class AuthService {
       .delete()
       .where('"expiresAt" < :now', { now: new Date() })
       .orWhere('"used" = true AND "expiresAt" < :now', { now: new Date() })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
+  /** Purge des jetons de vérification périmés. */
+  async purgeExpiredVerificationTokens(): Promise<number> {
+    const result = await this.verificationTokens
+      .createQueryBuilder()
+      .delete()
+      .where('"expiresAt" < :now', { now: new Date() })
       .execute();
 
     return result.affected ?? 0;

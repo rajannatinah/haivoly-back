@@ -2,6 +2,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   UpdateDateColumn,
 } from 'typeorm';
@@ -10,6 +12,7 @@ import { BaseEntity } from '../../common/entities/base.entity';
 import { Role } from '../../common/enums/domain.enums';
 import type { Parcelle } from '../../parcelles/entities/parcelle.entity';
 import type { PasswordResetToken } from '../../auth/entities/password-reset-token.entity';
+import type { EmailVerificationToken } from '../../auth/entities/email-verification-token.entity';
 import type { Action } from '../../actions/entities/action.entity';
 import type { Recommendation } from '../../recommendations/entities/recommendation.entity';
 
@@ -35,9 +38,16 @@ export class Utilisateur extends BaseEntity {
     type: 'enum',
     enum: Role,
     enumName: 'Role',
-    default: Role.AGRICULTEUR,
+    default: Role.PROPRIETAIRE,
   })
   role: Role;
+
+  /** Adresse e-mail confirmée par l'utilisateur (preuve de possession). */
+  @Column({ type: 'boolean', name: 'estVerifie', default: false })
+  estVerifie: boolean;
+
+  @Column({ type: 'timestamp', precision: 3, name: 'emailVerifieA', nullable: true })
+  emailVerifieA: Date | null;
 
   @CreateDateColumn({
     type: 'timestamp',
@@ -53,11 +63,25 @@ export class Utilisateur extends BaseEntity {
   })
   modifieA: Date;
 
+  /** Rattachement a un PROPRIETAIRE : null pour un compte non rattache. */
+  @Column({ type: 'text', name: 'proprietaireId', nullable: true })
+  proprietaireId: string | null;
+
+  @ManyToOne('Utilisateur', 'agriculteurs', { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'proprietaireId' })
+  proprietaire: Utilisateur | null;
+
+  @OneToMany('Utilisateur', 'proprietaire')
+  agriculteurs: Utilisateur[];
+
   @OneToMany('Parcelle', 'utilisateur')
   parcelles: Parcelle[];
 
   @OneToMany('PasswordResetToken', 'utilisateur')
   passwordResetTokens: PasswordResetToken[];
+
+  @OneToMany('EmailVerificationToken', 'utilisateur')
+  emailVerificationTokens: EmailVerificationToken[];
 
   @OneToMany('Action', 'utilisateur')
   actions: Action[];

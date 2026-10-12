@@ -10,10 +10,15 @@ import { MailService } from './mail.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { EmailVerificationToken } from './entities/email-verification-token.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Utilisateur, PasswordResetToken]),
+    TypeOrmModule.forFeature([
+      Utilisateur,
+      PasswordResetToken,
+      EmailVerificationToken,
+    ]),
     ConfigModule,
     PassportModule,
     JwtModule.registerAsync({

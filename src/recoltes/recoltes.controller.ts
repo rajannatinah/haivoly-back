@@ -7,18 +7,15 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import { RecoltesService } from './recoltes.service';
 import { CreateRecolteDto, UpdateRecolteDto } from './dto/recolte.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
 export class RecoltesController {
   constructor(private readonly recoltesService: RecoltesService) {}
 

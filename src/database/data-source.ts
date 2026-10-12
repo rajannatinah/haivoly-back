@@ -21,6 +21,7 @@ import { PhotoRecolte } from '../photos-recoltes/entities/photo-recolte.entity';
 import { Action } from '../actions/entities/action.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../auth/entities/email-verification-token.entity';
 
 function loadEnvFile(): void {
   loadEnv();
@@ -55,6 +56,7 @@ export const entities = [
   Action,
   Recommendation,
   PasswordResetToken,
+  EmailVerificationToken,
 ];
 
 export function buildDataSourceOptions(

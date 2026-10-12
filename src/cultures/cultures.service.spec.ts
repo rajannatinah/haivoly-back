@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { CulturesService } from './cultures.service';
+import { UsersService } from '../users/users.service';
 import { Culture } from './entities/culture.entity';
 import { PointGPSCulture } from './entities/point-gps-culture.entity';
 import { Recolte } from '../recoltes/entities/recolte.entity';
@@ -33,6 +34,16 @@ describe('CulturesService — cycle de vie', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         CulturesService,
+        {
+          provide: UsersService,
+          useValue: {
+            // Portee par defaut = l'appelant seul : c'est le comportement
+            // AGRICULTEUR, celui que ces tests verifient.
+            porteeDeConsultation: jest
+              .fn()
+              .mockImplementation((id: string) => Promise.resolve([id])),
+          },
+        },
         { provide: getRepositoryToken(Culture), useValue: cultures },
         {
           provide: getRepositoryToken(PointGPSCulture),

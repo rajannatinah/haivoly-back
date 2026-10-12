@@ -1,19 +1,29 @@
 import {
   BadRequestException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { Parcelle } from './entities/parcelle.entity';
 import { PointGPS } from '../points-gps/entities/point-gps.entity';
+import { UsersService } from '../users/users.service';
 import { CreateParcelleDto } from './dto/creation-parcelle.dto';
 import { UpdateParcelleDto } from './dto/modification-parcelle.dto';
 import { ModifierDelimitationDto } from './dto/delimitation.dto';
 import { StatutParcelle } from '../common/enums/domain.enums';
 import { calculerSuperficie, centroide } from '../common/utils/geo.util';
+import {
+  dedupliquer,
+  messagesDesDefauts,
+  validerGeometrie,
+  type Sommet,
+} from '../common/utils/geometry.util';
+import { ApiException } from '../common/errors/api-error';
+import { ErrorCode } from '../common/errors/error-codes';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
 import { paginate } from '../common/dto/pagination.dto';
 
@@ -36,13 +46,54 @@ export class ParcellesService {
   private readonly logger = new Logger(ParcellesService.name);
 
   constructor(
+    private readonly usersService: UsersService,
     @InjectRepository(Parcelle)
     private readonly parcelles: Repository<Parcelle>,
   ) {}
 
+  private validerDelimitation(points: readonly Sommet[]): Sommet[] {
+    if (!Array.isArray(points) || points.length < 3) {
+      throw new BadRequestException(
+        'Une parcelle doit avoir au moins 3 points GPS distincts.',
+      );
+    }
+
+    const sommets = points.map((point) => ({
+      latitude: point.latitude,
+      longitude: point.longitude,
+    }));
+    const utiles = dedupliquer(sommets);
+
+    // Surface calculée sur les sommets utiles : c'est elle qui révèle les
+    // géométries dégénérées (points identiques, polygone aplati, papillon).
+    const surface =
+      utiles.length >= 3 ? calculerSuperficie(utiles) : Number.NaN;
+
+    const resultat = validerGeometrie(sommets, surface);
+
+    if (!resultat.valide) {
+      this.logger.warn(
+        `[géométrie] délimitation refusée : ${resultat.defauts.join(', ')}`,
+      );
+
+      throw new ApiException(
+        ErrorCode.PARCEL_INVALID_GEOMETRY,
+        messagesDesDefauts(resultat.defauts).join(' '),
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return utiles;
+  }
+
   async create(dto: CreateParcelleDto, utilisateurId: string) {
     return this.parcelles.manager.transaction(async (manager) => {
-      const points = dto.pointsGPS ?? [];
+      // Une délimitation partielle (< 3 sommets) reste tolérée à la création :
+      // le wizard mobile la complète ensuite. Dès 3 sommets, on valide.
+      const points: Sommet[] =
+        (dto.pointsGPS?.length ?? 0) >= 3
+          ? this.validerDelimitation(dto.pointsGPS ?? [])
+          : dedupliquer(dto.pointsGPS ?? []);
 
       const parcelle = manager.create(Parcelle, {
         nom: dto.nom.trim(),
@@ -79,8 +130,8 @@ export class ParcellesService {
               parcelleId: saved.id,
               latitude: point.latitude,
               longitude: point.longitude,
-              // `ordre` optionnel côté client : déduit du tableau.
-              ordre: point.ordre ?? index,
+              // `ordre` déduit de la position : l'ordre reçu est conservé.
+              ordre: index,
             }),
           ),
         );
@@ -101,8 +152,11 @@ export class ParcellesService {
     limit = 50,
     statut?: StatutParcelle,
   ): Promise<PaginatedResult<Parcelle>> {
+    // Portee elargie pour un PROPRIETAIRE : ses parcelles + celles de ses
+    // agriculteurs rattaches (cahier des charges §3 et Annexe A).
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const where = {
-      utilisateurId,
+      utilisateurId: In(portee),
       ...(statut ? { statut } : {}),
     };
 
@@ -128,8 +182,11 @@ export class ParcellesService {
     utilisateurId: string,
     options: { withPoints?: boolean; includeArchived?: boolean } = {},
   ): Promise<Parcelle> {
+    // Portee elargie : un PROPRIETAIRE accede aux parcelles de ses
+    // agriculteurs rattaches (cahier des charges §3, Annexe A).
+    const portee = await this.usersService.porteeDeConsultation(utilisateurId);
     const parcelle = await this.parcelles.findOne({
-      where: { id, utilisateurId },
+      where: { id, utilisateurId: In(portee) },
       relations: { pointsGPS: options.withPoints !== false },
     });
 
@@ -208,22 +265,18 @@ export class ParcellesService {
       withPoints: false,
     });
 
-    if (pointsGPS.length < 3) {
-      throw new BadRequestException(
-        'Une parcelle doit avoir au moins 3 points GPS.',
-      );
-    }
+    const sommets = this.validerDelimitation(pointsGPS);
 
     return this.parcelles.manager.transaction(async (manager) => {
       await manager.save(
-        pointsGPS.map((point, index) =>
+        sommets.map((point, index) =>
           manager.create(PointGPS, {
             parcelleId,
             latitude: point.latitude,
             longitude: point.longitude,
-            // `ordre` est optionnel côté client : il est déduit de la
-            // position dans le tableau pour garantir un polygone séquentiel.
-            ordre: point.ordre ?? index,
+            // `ordre` déduit de la position dans le tableau : l'ordre reçu
+            // est conservé et garantit un polygone séquentiel.
+            ordre: index,
           }),
         ),
       );
@@ -242,12 +295,8 @@ export class ParcellesService {
     dto: ModifierDelimitationDto,
     utilisateurId: string,
   ) {
-    if (dto.pointsGPS.length < 3) {
-      throw new BadRequestException(
-        'Une parcelle doit avoir au moins 3 points GPS.',
-      );
-    }
-
+    // La validation complète (doublons, auto-intersections, surface) est
+    // appliquée par replacePoints.
     return this.replacePoints(
       parcelleId,
       dto.pointsGPS,
@@ -274,30 +323,26 @@ export class ParcellesService {
       );
     }
 
-    if (points.length < 3) {
-      throw new BadRequestException(
-        'Une parcelle doit avoir au moins 3 points GPS.',
-      );
-    }
+    const sommets = this.validerDelimitation(points);
 
     return this.parcelles.manager.transaction(async (manager) => {
       await manager.delete(PointGPS, { parcelleId });
 
       await manager.save(
-        points.map((point, index) =>
+        sommets.map((point, index) =>
           manager.create(PointGPS, {
             parcelleId,
             latitude: point.latitude,
             longitude: point.longitude,
-            // `ordre` est optionnel côté client : il est déduit de la
-            // position dans le tableau pour garantir un polygone séquentiel.
-            ordre: point.ordre ?? index,
+            // `ordre` déduit de la position dans le tableau : l'ordre reçu
+            // est conservé et garantit un polygone séquentiel.
+            ordre: index,
           }),
         ),
       );
 
-      const surface = superficie ?? calculerSuperficie(points);
-      const centre = centroide(points);
+      const surface = superficie ?? calculerSuperficie(sommets);
+      const centre = centroide(sommets);
 
       await manager.update(
         Parcelle,

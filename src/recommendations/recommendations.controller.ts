@@ -7,7 +7,6 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import { RecommendationsService } from './recommendations.service';
@@ -15,18 +14,20 @@ import {
   CreateRecommendationDto,
   RecommendationQueryDto,
 } from './dto/recommendation.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Role } from '../common/enums/domain.enums';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 
 @Controller('recommendations')
-@UseGuards(JwtAuthGuard)
 export class RecommendationsController {
   constructor(
     private readonly recommendationsService: RecommendationsService,
   ) {}
 
+  /** Publication d'une recommandation : réservée au propriétaire. */
   @Post()
+  @Roles(Role.PROPRIETAIRE)
   create(@Body() dto: CreateRecommendationDto) {
     return this.recommendationsService.create(dto);
   }
@@ -50,7 +51,9 @@ export class RecommendationsController {
     return this.recommendationsService.unreadCount(user.id);
   }
 
+  /** Vue de pilotage (toutes les recommandations) : propriétaire. */
   @Get()
+  @Roles(Role.PROPRIETAIRE)
   findAll(@Query() query: RecommendationQueryDto) {
     return this.recommendationsService.findAll(query);
   }
@@ -70,8 +73,9 @@ export class RecommendationsController {
     return this.recommendationsService.markUnread(id, user.id);
   }
 
+  /** Suppression : le destinataire ou le propriétaire. */
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.recommendationsService.remove(id, user.id);
+    return this.recommendationsService.remove(id, user);
   }
 }

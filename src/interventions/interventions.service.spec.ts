@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { InterventionsService } from './interventions.service';
+import { UsersService } from '../users/users.service';
 import { Intervention } from './entities/intervention.entity';
 import { Culture } from '../cultures/entities/culture.entity';
 import {
@@ -28,6 +29,14 @@ describe('InterventionsService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         InterventionsService,
+        {
+          provide: UsersService,
+          useValue: {
+            porteeDeConsultation: jest
+              .fn()
+              .mockImplementation((id: string) => Promise.resolve([id])),
+          },
+        },
         { provide: getRepositoryToken(Intervention), useValue: interventions },
         { provide: getRepositoryToken(Culture), useValue: cultures },
       ],

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { ParcellesService } from './parcelles.service';
+import { UsersService } from '../users/users.service';
 import { Parcelle } from './entities/parcelle.entity';
 import { PointGPS } from '../points-gps/entities/point-gps.entity';
 import { StatutParcelle } from '../common/enums/domain.enums';
@@ -30,6 +31,16 @@ describe('ParcellesService — ownership & cycle de vie', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ParcellesService,
+        {
+          provide: UsersService,
+          useValue: {
+            // Portee par defaut = l'appelant seul : c'est le comportement
+            // AGRICULTEUR, celui que ces tests verifient.
+            porteeDeConsultation: jest
+              .fn()
+              .mockImplementation((id: string) => Promise.resolve([id])),
+          },
+        },
         { provide: getRepositoryToken(Parcelle), useValue: parcelles },
         { provide: getRepositoryToken(PointGPS), useValue: createMockRepo() },
       ],
