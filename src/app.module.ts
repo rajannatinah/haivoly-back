@@ -7,7 +7,6 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ParcellesModule } from './parcelles/parcelles.module';
-import { PointsGpsModule } from './points-gps/points-gps.module';
 import { CulturesModule } from './cultures/cultures.module';
 import { InterventionsModule } from './interventions/interventions.module';
 import { ObservationsModule } from './observations/observations.module';
@@ -16,6 +15,8 @@ import { PhotosModule } from './photos/photos.module';
 import { PhotosInterventionsModule } from './photos-interventions/photos-interventions.module';
 import { PhotosRecoltesModule } from './photos-recoltes/photos-recoltes.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
+import { MailModule } from './mail/mail.module';
+import { UsernameModule } from './users/username.module';
 import { ActionsModule } from './actions/actions.module';
 import { SynchronizationModule } from './synchronization/synchronization.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -37,8 +38,9 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     // Domaines
     AuthModule,
     UsersModule,
+    MailModule,
+    UsernameModule,
     ParcellesModule,
-    PointsGpsModule,
     CulturesModule,
     InterventionsModule,
     ObservationsModule,

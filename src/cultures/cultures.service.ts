@@ -14,7 +14,6 @@ import { Recolte } from '../recoltes/entities/recolte.entity';
 import { StatutCulture, StatutParcelle } from '../common/enums/domain.enums';
 import { CreateCultureDto } from './dto/creation-culture.dto';
 import { UpdateCultureDto } from './dto/modification-culture.dto';
-import { calculerSuperficie } from '../common/utils/geo.util';
 import { statutCultureAJour } from '../common/utils/culture-statut.util';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
 import { paginate } from '../common/dto/pagination.dto';
@@ -304,15 +303,6 @@ export class CulturesService {
         ),
       );
     });
-  }
-  /** Superficie délimitée d'une culture (m²) — utilisée par le mobile. */
-  async superficieCulture(cultureId: string): Promise<number | null> {
-    const points = await this.points.find({
-      where: { cultureId },
-      order: { ordre: 'ASC' },
-    });
-    if (points.length < 3) return null;
-    return calculerSuperficie(points);
   }
   private async reconcilierStatut<T extends Culture | null | undefined>(
     culture: T,

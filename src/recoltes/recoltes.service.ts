@@ -10,7 +10,6 @@ import { In, Repository } from 'typeorm';
 
 import { Recolte } from './entities/recolte.entity';
 import { UsersService } from '../users/users.service';
-import { PhotoRecolte } from '../photos-recoltes/entities/photo-recolte.entity';
 import { Culture } from '../cultures/entities/culture.entity';
 import { StatutCulture } from '../common/enums/domain.enums';
 import { CreateRecolteDto, UpdateRecolteDto } from './dto/recolte.dto';
@@ -29,8 +28,6 @@ export class RecoltesService {
     private readonly recoltes: Repository<Recolte>,
     @InjectRepository(Culture)
     private readonly cultures: Repository<Culture>,
-    @InjectRepository(PhotoRecolte)
-    private readonly photoRecoltes: Repository<PhotoRecolte>,
   ) {}
 
   async create(
@@ -149,7 +146,7 @@ export class RecoltesService {
     return recolte;
   }
 
-  async requireOwnedRecolte(
+  private async requireOwnedRecolte(
     recolteId: string,
     utilisateurId: string,
   ): Promise<Recolte> {
@@ -177,20 +174,6 @@ export class RecoltesService {
     await this.requireOwnedRecolte(id, utilisateurId);
     throw new BadRequestException(
       'Impossible de supprimer une récolte d’une culture récoltée',
-    );
-  }
-
-  async uploadPhoto(recolteId: string, utilisateurId: string, url: string) {
-    const recolte = await this.requireOwnedRecolte(recolteId, utilisateurId);
-
-    if (recolte.culture.statut !== StatutCulture.RECOLTEE) {
-      throw new BadRequestException(
-        'La culture doit être récoltée pour ajouter une photo',
-      );
-    }
-
-    return this.photoRecoltes.save(
-      this.photoRecoltes.create({ url, recolteId }),
     );
   }
 }

@@ -1,5 +1,12 @@
-
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+export function estDateSeuleValide(value: unknown): value is string {
+  if (typeof value !== 'string' || !DATE_ONLY_REGEX.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+  );
+}
 
 export function parseDate(
   value: string | Date | null | undefined,
@@ -34,18 +41,7 @@ export function requireDate(
 }
 
 export function requireDateOnly(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !DATE_ONLY_REGEX.test(value)) {
-    throw new DateParseError(field, value);
-  }
-
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-
-  if (Number.isNaN(parsed.getTime())) {
-    throw new DateParseError(field, value);
-  }
-
-  // Rejette les dates inexistantes (« 2026-02-31 »).
-  if (parsed.toISOString().slice(0, 10) !== value) {
+  if (!estDateSeuleValide(value)) {
     throw new DateParseError(field, value);
   }
 

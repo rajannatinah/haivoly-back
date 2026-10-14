@@ -6,10 +6,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { MailService } from './mail.service';
+import { AuthMaintenanceService } from './auth-maintenance.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { MailModule } from '../mail/mail.module';
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { PasswordSetupToken } from './entities/password-setup-token.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
 
 @Module({
@@ -17,10 +19,14 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
     TypeOrmModule.forFeature([
       Utilisateur,
       PasswordResetToken,
+      PasswordSetupToken,
       EmailVerificationToken,
     ]),
     ConfigModule,
     PassportModule,
+    // L'envoi des messages n'est pas la responsabilité de l'authentification :
+    // le module mail fournit transport, file d'envoi et modèles.
+    MailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -42,7 +48,7 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, MailService, JwtStrategy],
-  exports: [AuthService, MailService],
+  providers: [AuthService, JwtStrategy, AuthMaintenanceService],
+  exports: [AuthService],
 })
 export class AuthModule {}

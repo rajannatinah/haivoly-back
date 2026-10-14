@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -17,6 +18,7 @@ import type { Action } from '../../actions/entities/action.entity';
 import type { Recommendation } from '../../recommendations/entities/recommendation.entity';
 
 @Entity({ name: 'Utilisateur' })
+@Index('UQ_Utilisateur_username', ['username'], { unique: true })
 export class Utilisateur extends BaseEntity {
   @Column({ type: 'text' })
   nom: string;
@@ -26,6 +28,12 @@ export class Utilisateur extends BaseEntity {
 
   @Column({ type: 'text', unique: true })
   email: string;
+
+  @Column({ type: 'varchar', length: 30 })
+  username: string;
+
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  langue: string | null;
 
   @Column({ type: 'text', nullable: true })
   telephone: string | null;
@@ -46,7 +54,15 @@ export class Utilisateur extends BaseEntity {
   @Column({ type: 'boolean', name: 'estVerifie', default: false })
   estVerifie: boolean;
 
-  @Column({ type: 'timestamp', precision: 3, name: 'emailVerifieA', nullable: true })
+  @Column({ type: 'boolean', name: 'motDePasseProvisoire', default: false })
+  motDePasseProvisoire: boolean;
+
+  @Column({
+    type: 'timestamp',
+    precision: 3,
+    name: 'emailVerifieA',
+    nullable: true,
+  })
   emailVerifieA: Date | null;
 
   @CreateDateColumn({
@@ -67,7 +83,10 @@ export class Utilisateur extends BaseEntity {
   @Column({ type: 'text', name: 'proprietaireId', nullable: true })
   proprietaireId: string | null;
 
-  @ManyToOne('Utilisateur', 'agriculteurs', { nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne('Utilisateur', 'agriculteurs', {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'proprietaireId' })
   proprietaire: Utilisateur | null;
 

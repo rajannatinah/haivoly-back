@@ -25,11 +25,13 @@ export class RecommendationsController {
     private readonly recommendationsService: RecommendationsService,
   ) {}
 
-  /** Publication d'une recommandation : réservée au propriétaire. */
   @Post()
   @Roles(Role.PROPRIETAIRE)
-  create(@Body() dto: CreateRecommendationDto) {
-    return this.recommendationsService.create(dto);
+  create(
+    @Body() dto: CreateRecommendationDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.recommendationsService.create(dto, user);
   }
 
   /** Recommandations de l'utilisateur connecté. */

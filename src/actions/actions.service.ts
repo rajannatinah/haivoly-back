@@ -9,6 +9,7 @@ import { CreateActionDto } from './dto/create-action.dto';
 import {
   RecommendationPriority,
   RecommendationType,
+  Role,
   SyncStatus,
 } from '../common/enums/domain.enums';
 import { parseDate } from '../common/utils/date.util';
@@ -22,6 +23,10 @@ export interface ActionQuery {
   search?: string;
   page?: number;
   limit?: number;
+  /** Auteur de la requête : sert au calcul du périmètre de consultation. */
+  demandeurId?: string;
+  /** Le propriétaire voit les actions de tous ses agriculteurs rattachés. */
+  estProprietaire?: boolean;
 }
 
 @Injectable()
@@ -75,6 +80,15 @@ export class ActionsService {
       entityType: dto.entityType,
     });
 
+    // Notifie le propriétaire rattaché : chaque action d'un agriculteur doit
+    // apparaître dans son centre de notifications pour pilotage.
+    await this.notifierActionProprietaire({
+      acteurId: userId,
+      actionType: dto.actionType,
+      entityType: dto.entityType,
+      entityId: action.entityId ?? null,
+    });
+
     return {
       id: action.clientId ?? action.id,
       status: 'SYNCED' as const,
@@ -93,8 +107,22 @@ export class ActionsService {
       .skip((page - 1) * limit)
       .take(limit);
 
-    if (query.userId)
+    // Le propriétaire voit les actions de tous ses agriculteurs rattachés ;
+    // l'agriculteur ne voit que les siennes. Un filtre `userId` explicite est
+    // ignoré pour un agriculteur (cloisonnement).
+    if (query.estProprietaire) {
+      if (query.userId) {
+        qb.andWhere('a.userId = :userId', { userId: query.userId });
+      } else if (query.demandeurId) {
+        const portee = await this.porteeDeConsultation(query.demandeurId);
+        qb.andWhere('a.userId IN (:...portee)', { portee });
+      }
+    } else if (query.demandeurId) {
+      qb.andWhere('a.userId = :userId', { userId: query.demandeurId });
+    } else if (query.userId) {
       qb.andWhere('a.userId = :userId', { userId: query.userId });
+    }
+
     if (query.actionType) {
       qb.andWhere('a.actionType = :actionType', {
         actionType: query.actionType,
@@ -197,6 +225,123 @@ export class ActionsService {
         ? Math.round((synced / totalActions) * 1000) / 10
         : 100,
     };
+  }
+
+  /**
+   * Notifie le propriétaire rattaché à l'auteur lorsqu'un agriculteur réalise
+   * une action. La recommandation s'affiche dans le centre de notifications du
+   * propriétaire (page Recommandations du web, notifications du mobile).
+   * Un échec de notification ne fait jamais échouer l'action.
+   */
+  async notifierActionProprietaire(params: {
+    acteurId: string;
+    actionType: string;
+    entityType: string;
+    entityId?: string | null;
+  }): Promise<void> {
+    try {
+      const acteur = await this.utilisateurs.findOne({
+        where: { id: params.acteurId },
+        select: ['id', 'role', 'proprietaireId', 'nom', 'prenom'],
+      });
+
+      if (!acteur || acteur.role !== Role.AGRICULTEUR) {
+        return;
+      }
+
+      // Le propriétaire rattaché si connu ; sinon tous les propriétaires de la
+      // plateforme (vue globale) afin qu'aucune action terrain ne soit ignorée.
+      const destinataires = acteur.proprietaireId
+        ? [acteur.proprietaireId]
+        : (
+            await this.utilisateurs.find({
+              where: { role: Role.PROPRIETAIRE },
+              select: ['id'],
+            })
+          ).map((proprietaire) => proprietaire.id);
+
+      if (destinataires.length === 0) {
+        return;
+      }
+
+      const nomActeur =
+        [acteur.prenom, acteur.nom]
+          .filter((valeur): valeur is string =>
+            Boolean(valeur && valeur.trim()),
+          )
+          .join(' ')
+          .trim() || 'Un agriculteur';
+      const action = this.decrireAction(params.actionType, params.entityType);
+
+      await this.recommendations.save(
+        destinataires.map((userId) =>
+          this.recommendations.create({
+            userId,
+            title: `Action terrain : ${action}`,
+            message: `${nomActeur} a effectué « ${action} » sur le terrain. Consultez le journal des actions pour en savoir plus.`,
+            type: RecommendationType.INFO,
+            priority: RecommendationPriority.LOW,
+            metadata: {
+              origine: 'ACTION_AGRICULTEUR',
+              acteurId: acteur.id,
+              actionType: params.actionType,
+              entityType: params.entityType,
+              entityId: params.entityId ?? null,
+            },
+          }),
+        ),
+      );
+    } catch (error) {
+      // Une notification manquée ne doit jamais bloquer l'enregistrement.
+      this.logger.warn(
+        `Notification propriétaire non programmée: ${String(error)}`,
+      );
+    }
+  }
+
+  /** Libellé lisible d'une action pour la notification du propriétaire. */
+  private decrireAction(actionType: string, entityType: string): string {
+    const [verbe, entiteBrute] = actionType.includes('_')
+      ? actionType.split('_')
+      : [actionType, entityType];
+
+    const verbes: Record<string, string> = {
+      CREATE: 'Création',
+      UPDATE: 'Modification',
+      DELETE: 'Suppression',
+    };
+    const entites: Record<string, string> = {
+      PARCELLE: 'parcelle',
+      CULTURE: 'culture',
+      INTERVENTION: 'intervention',
+      OBSERVATION: 'observation',
+      RECOLTE: 'récolte',
+      POINT_GPS: 'point GPS',
+      PHOTO: 'photo',
+    };
+
+    return `${verbes[verbe] ?? verbe} • ${
+      entites[entiteBrute] ?? entiteBrute.toLowerCase()
+    }`;
+  }
+
+  /**
+   * Périmètre de consultation. Un PROPRIÉTAIRE voit toutes les actions de la
+   * plateforme (y compris celles des comptes non rattachés) ; un agriculteur
+   * ne voit que les siennes.
+   */
+  private async porteeDeConsultation(utilisateurId: string): Promise<string[]> {
+    const appelant = await this.utilisateurs.findOne({
+      where: { id: utilisateurId },
+      select: ['id', 'role'],
+    });
+
+    if (!appelant || appelant.role !== Role.PROPRIETAIRE) {
+      return [utilisateurId];
+    }
+
+    const tous = await this.utilisateurs.find({ select: ['id'] });
+    return tous.map((u) => u.id);
   }
 
   private labelOf(value: unknown): string {

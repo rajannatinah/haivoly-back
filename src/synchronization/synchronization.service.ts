@@ -67,9 +67,6 @@ export class SynchronizationService {
     const results: SyncActionResult[] = [];
     const identifiantsLocaux = new Map<string, string>();
 
-    // Les actions restent dans l'ordre de création. Cela permet aux opérations
-    // dépendantes de résoudre l'identifiant temporaire d'un parent créé plus tôt
-    // dans le même lot, sans jamais faire confiance à un userId du client.
     for (const action of dto.actions ?? []) {
       const resolue = this.resoudreReferencesLocales(action, identifiantsLocaux);
       const resultat = await this.applyAction(userId, resolue, dto.deviceId);
@@ -138,9 +135,6 @@ export class SynchronizationService {
       actionType: action.actionType,
     };
 
-    // ── 1. Idempotence : l'action a-t-elle déjà été traitée ? ──
-    // L'idempotence est strictement liée à l'utilisateur authentifié; une
-    // collision de clientId entre comptes ne doit jamais révéler une action.
     const existing = await this.actions.findOne({ where: { clientId, userId } });
 
     if (existing && existing.syncStatus === String(SyncStatus.SYNCED)) {
@@ -233,6 +227,20 @@ export class SynchronizationService {
         .catch((error) =>
           this.logger.warn(
             `Règles de recommandation en échec: ${String(error)}`,
+          ),
+        );
+
+      // Notifie le propriétaire rattaché pour chaque action terrain.
+      void this.actionsService
+        .notifierActionProprietaire({
+          acteurId: userId,
+          actionType: action.actionType,
+          entityType: action.entityType,
+          entityId: outcome.entityId ?? action.entityId ?? null,
+        })
+        .catch((error) =>
+          this.logger.warn(
+            `Notification propriétaire en échec: ${String(error)}`,
           ),
         );
 

@@ -43,6 +43,7 @@ describe('SynchronizationService — idempotence & application des actions', () 
   const recoltes = { create: jest.fn(), update: jest.fn(), remove: jest.fn() };
   const actionsService = {
     triggerRecommendationRules: jest.fn().mockResolvedValue(undefined),
+    notifierActionProprietaire: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {

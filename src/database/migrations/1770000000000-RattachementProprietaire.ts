@@ -1,11 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Rattachement agriculteur -> proprietaire.
- * Justifie par le cahier des charges : §3 (le proprietaire doit consulter
- * les parcelles et cultures), §5.2 (parcelle avec son exploitant de
- * rattachement), Annexe A (controle serveur = filtrage des donnees).
- */
 export class RattachementProprietaire1770000000000 implements MigrationInterface {
   name = 'RattachementProprietaire1770000000000';
 

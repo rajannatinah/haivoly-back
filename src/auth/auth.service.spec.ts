@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -11,10 +7,13 @@ import * as bcrypt from 'bcrypt';
 
 import { AuthService } from './auth.service';
 import { createMockRepo } from '../test-utils/repo.mock';
-import { MailService } from './mail.service';
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { PasswordSetupToken } from './entities/password-setup-token.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { NotificationsMailService } from '../mail/notifications-mail.service';
+import { MailTransportService } from '../mail/mail-transport.service';
+import { UsernameService } from '../users/username.service';
 import { ApiException } from '../common/errors/api-error';
 import { Role } from '../common/enums/domain.enums';
 
@@ -22,18 +21,39 @@ describe('AuthService — sécurité', () => {
   let service: AuthService;
   let utilisateurs: ReturnType<typeof createMockRepo>;
   let resetTokens: ReturnType<typeof createMockRepo>;
+  let setupTokens: ReturnType<typeof createMockRepo>;
   let verificationTokens: ReturnType<typeof createMockRepo>;
-  let mail: Record<string, jest.Mock>;
+  let notifications: Record<string, jest.Mock>;
+  let transport: Record<string, jest.Mock>;
+  let usernames: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     utilisateurs = createMockRepo();
     resetTokens = createMockRepo();
+    setupTokens = createMockRepo();
     verificationTokens = createMockRepo();
-    mail = {
-      sendPasswordResetEmail: jest.fn(),
-      buildResetUrl: jest.fn(() => 'exp://haivoly/reset'),
-      envoyerVerificationEmail: jest.fn(),
-      buildVerificationUrl: jest.fn(() => 'exp://haivoly/verify-email?token=t'),
+    notifications = {
+      bienvenueAvecVerification: jest.fn(async () => ({ envoye: true })),
+      rappelVerification: jest.fn(async () => ({ envoye: true })),
+      activationCompte: jest.fn(async () => ({ envoye: true })),
+      reinitialisationMotDePasse: jest.fn(async () => ({ envoye: true })),
+      recommandationRecue: jest.fn(async () => ({ envoye: true })),
+    };
+    transport = {
+      buildVerificationUrl: jest.fn((t: string) => `exp://haivoly/verify?token=${t}`),
+      buildResetUrl: jest.fn((t: string) => `exp://haivoly/reset?token=${t}`),
+      buildPageUrl: jest.fn((chemin: string, t: string) => `https://haivoly.mg/${chemin}?token=${t}`),
+    };
+    usernames = {
+      avecRepriseSurCollision: jest.fn(
+        async (
+          _source: unknown,
+          operation: (username: string) => Promise<unknown>,
+          options?: { username?: string },
+        ) => operation(options?.username ?? 'utilisateur.genere'),
+      ),
+      normaliserEtValider: jest.fn(async (valeur: string) => valeur),
+      genererDisponible: jest.fn(async () => 'utilisateur.genere'),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -45,18 +65,29 @@ describe('AuthService — sécurité', () => {
           useValue: resetTokens,
         },
         {
+          provide: getRepositoryToken(PasswordSetupToken),
+          useValue: setupTokens,
+        },
+        {
           provide: getRepositoryToken(EmailVerificationToken),
           useValue: verificationTokens,
         },
         {
           provide: JwtService,
-          useValue: { signAsync: jest.fn(async () => 'jwt-token') },
+          useValue: {
+            signAsync: jest.fn(async () => 'jwt-token'),
+            decode: jest.fn(() => ({
+              exp: Math.floor(Date.now() / 1000) + 3600,
+            })),
+          },
         },
         {
           provide: ConfigService,
           useValue: { get: jest.fn(() => undefined) },
         },
-        { provide: MailService, useValue: mail },
+        { provide: NotificationsMailService, useValue: notifications },
+        { provide: MailTransportService, useValue: transport },
+        { provide: UsernameService, useValue: usernames },
       ],
     }).compile();
 
@@ -114,7 +145,7 @@ describe('AuthService — sécurité', () => {
 
     expect(resultat.estVerifie).toBe(false);
     expect(verificationTokens.save).toHaveBeenCalled();
-    expect(mail.envoyerVerificationEmail).toHaveBeenCalled();
+    expect(notifications.bienvenueAvecVerification).toHaveBeenCalled();
 
     const stocke = verificationTokens.save.mock.calls[0][0] as {
       tokenHash: string;
@@ -168,7 +199,7 @@ describe('AuthService — sécurité', () => {
     });
   });
 
-  it('limite la fréquence des renvois de vérification', async () => {
+  it('applique un délai anti-spam avant un nouveau renvoi de vérification', async () => {
     utilisateurs.findOne.mockResolvedValue({
       id: 'u1',
       email: 'a@b.mg',
@@ -176,9 +207,13 @@ describe('AuthService — sécurité', () => {
     });
     verificationTokens.findOne.mockResolvedValue({ createdAt: new Date() });
 
-    await expect(service.resendVerification('a@b.mg')).rejects.toMatchObject({
-      response: { code: 'AUTH_VERIFICATION_RESEND_LIMIT' },
-    });
+    // Le délai par adresse ne lève pas d'exception : cela révélerait
+    // l'existence du compte. La réponse reste générique et aucun envoi n'a lieu.
+    const resultat = await service.resendVerification('a@b.mg');
+
+    expect(resultat.message).toContain('Si un compte non confirmé');
+    expect(verificationTokens.save).not.toHaveBeenCalled();
+    expect(notifications.rappelVerification).not.toHaveBeenCalled();
   });
 
   it('renvoie la même réponse pour une adresse inconnue (anti-énumération)', async () => {
@@ -187,14 +222,14 @@ describe('AuthService — sécurité', () => {
     const resultat = await service.resendVerification('inconnu@haivoly.mg');
 
     expect(resultat.message).toContain('Si un compte non confirmé');
-    expect(mail.envoyerVerificationEmail).not.toHaveBeenCalled();
+    expect(notifications.rappelVerification).not.toHaveBeenCalled();
   });
 
   it('rejette un email déjà utilisé', async () => {
     utilisateurs.findOne.mockResolvedValue({ id: 'u1' });
     await expect(
       service.register({ nom: 'A', email: 'a@b.mg', password: 'MotDePasse1' }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toBeInstanceOf(ApiException);
   });
 
   it('hache le mot de passe et ne renvoie jamais le hash', async () => {
@@ -280,7 +315,7 @@ describe('AuthService — sécurité', () => {
 
     await expect(
       service.resetPassword('token-inconnu', 'NouveauPass1', 'NouveauPass1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ApiException);
   });
 
   it('rejette un token déjà utilisé', async () => {
@@ -291,7 +326,7 @@ describe('AuthService — sécurité', () => {
 
     await expect(
       service.resetPassword('token', 'NouveauPass1', 'NouveauPass1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ApiException);
   });
 
   it('rejette un token expiré', async () => {
@@ -302,26 +337,26 @@ describe('AuthService — sécurité', () => {
 
     await expect(
       service.resetPassword('token', 'NouveauPass1', 'NouveauPass1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ApiException);
   });
 
   it('rejette des mots de passe non identiques', async () => {
     await expect(
       service.resetPassword('token', 'NouveauPass1', 'AutrePass1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ApiException);
   });
 
-  it('stocke uniquement le hash SHA-256 du token', async () => {
+  it('stocke uniquement le hash SHA-256 du token de réinitialisation', async () => {
     utilisateurs.findOne.mockResolvedValue({ id: 'u1', email: 'a@b.mg' });
 
     const result = await service.forgotPassword('a@b.mg');
-    const rawToken = (result as { _devToken?: string })._devToken;
     const storedToken = resetTokens.save.mock.calls[0][0] as {
       tokenHash: string;
     };
 
-    expect(rawToken).toBeDefined();
-    expect(storedToken.tokenHash).not.toBe(rawToken);
-    expect(storedToken.tokenHash).toHaveLength(64); // sha256 hex
+    // Le jeton en clair n'est jamais renvoyé ni stocké : seul son hash l'est.
+    expect(storedToken.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(result).not.toHaveProperty('token');
+    expect(result).not.toHaveProperty('_devToken');
   });
 });

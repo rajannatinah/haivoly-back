@@ -22,6 +22,8 @@ import { Action } from '../actions/entities/action.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
 import { EmailVerificationToken } from '../auth/entities/email-verification-token.entity';
+import { PasswordSetupToken } from '../auth/entities/password-setup-token.entity';
+import { EmailOutbox } from '../mail/mail-outbox.entity';
 
 function loadEnvFile(): void {
   loadEnv();
@@ -57,6 +59,8 @@ export const entities = [
   Recommendation,
   PasswordResetToken,
   EmailVerificationToken,
+  PasswordSetupToken,
+  EmailOutbox,
 ];
 
 export function buildDataSourceOptions(

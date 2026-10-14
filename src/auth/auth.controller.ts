@@ -18,6 +18,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { InitialiserMotDePasseDto } from './dto/initialiser-mot-de-passe.dto';
+import { VerifierJetonDto } from './dto/verifier-jeton.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -83,13 +85,34 @@ export class AuthController {
     return this.authService.forgotPassword(dto.email);
   }
 
+  @Post('verifier-jeton-initialisation')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  verifierJetonInitialisation(@Body() dto: VerifierJetonDto) {
+    return this.authService.verifierJetonInitialisation(dto.token);
+  }
+
+  /** Premier mot de passe d'un compte ouvert par un responsable. */
+  @Post('initialiser-mot-de-passe')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  initialiserMotDePasse(@Body() dto: InitialiserMotDePasseDto) {
+    return this.authService.initialiserMotDePasse(
+      dto.token,
+      dto.newPassword,
+      dto.confirmPassword,
+    );
+  }
+
   @Post('reset-password')
   @Public()
   @HttpCode(HttpStatus.OK)
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(
       dto.token,
-      dto.newPassword,
+      dto.motDePasse,
       dto.confirmPassword,
     );
   }

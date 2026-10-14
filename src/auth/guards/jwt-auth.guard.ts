@@ -13,12 +13,6 @@ function infoTexte(info: unknown): string {
   return '';
 }
 
-/**
- * Garde d'authentification enregistré globalement (APP_GUARD).
- *
- * Il doit s'exécuter AVANT le `RolesGuard` : sans cela `request.user` n'est
- * pas encore renseigné et le contrôle des rôles échoue systématiquement.
- */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(private readonly reflector: Reflector) {
