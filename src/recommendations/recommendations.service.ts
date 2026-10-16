@@ -73,6 +73,7 @@ export class RecommendationsService {
         cibles.map((cible) =>
           this.recommendations.create({
             userId: cible.id,
+            createdById: emitteur.id,
             title: titre,
             message: corps,
             type,
@@ -102,6 +103,7 @@ export class RecommendationsService {
     const enregistre = await this.recommendations.save(
       this.recommendations.create({
         userId: destinataire.id,
+        createdById: emitteur.id,
         title: titre,
         message: corps,
         type,
@@ -186,10 +188,17 @@ export class RecommendationsService {
       .createQueryBuilder('r')
       .leftJoin('r.utilisateur', 'u')
       .addSelect(['u.id', 'u.nom', 'u.prenom', 'u.username'])
+      .leftJoin('r.createur', 'c')
+      .addSelect(['c.id', 'c.nom', 'c.prenom', 'c.username'])
       .orderBy('r.createdAt', 'DESC');
 
     if (query.userId)
       qb.andWhere('r.userId = :userId', { userId: query.userId });
+    if (query.createdById) {
+      qb.andWhere('r.createdById = :createdById', {
+        createdById: query.createdById,
+      });
+    }
     if (query.type) qb.andWhere('r.type = :type', { type: query.type });
     if (query.priority) {
       qb.andWhere('r.priority = :priority', { priority: query.priority });
@@ -212,6 +221,8 @@ export class RecommendationsService {
   ): Promise<Recommendation[]> {
     const qb = this.recommendations
       .createQueryBuilder('r')
+      .leftJoin('r.createur', 'c')
+      .addSelect(['c.id', 'c.nom', 'c.prenom', 'c.username'])
       .where('r.userId = :userId', { userId })
       .orderBy('r.createdAt', 'DESC')
       .take(100);

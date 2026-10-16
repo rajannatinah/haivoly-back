@@ -42,6 +42,14 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# tooling IA / éditeur (jamais versionné)
+AGENTS.md
+CLAUDE.md
+.claude/
+.vscode/
+.cursor/
+.aider*
+
 # temp directory
 .temp
 .tmp

@@ -15,6 +15,13 @@ import {
 import { parseDate } from '../common/utils/date.util';
 import { PaginatedResult, paginate } from '../common/dto/pagination.dto';
 
+/** Canal d'une action terrain (métadonnée des notifications et du journal). */
+export type CanalActivite = 'EN_LIGNE' | 'SYNC' | 'JOURNAL';
+
+/** Recommandation de bienvenue : une seule fois par utilisateur (N-12). */
+export const TITRE_BIENVENUE_PREMIERE_PARCELLE =
+  'Bienvenue — première parcelle créée';
+
 export interface ActionQuery {
   userId?: string;
   actionType?: string;
@@ -87,6 +94,7 @@ export class ActionsService {
       actionType: dto.actionType,
       entityType: dto.entityType,
       entityId: action.entityId ?? null,
+      canal: 'JOURNAL',
     });
 
     return {
@@ -238,6 +246,10 @@ export class ActionsService {
     actionType: string;
     entityType: string;
     entityId?: string | null;
+    /** Canal de l'action : en ligne (routes métier), synchronisation, journal. */
+    canal?: CanalActivite;
+    /** Élément concerné (« Rizière Nord », « Irrigation »…), s'il est connu. */
+    libelle?: string | null;
   }): Promise<void> {
     try {
       const acteur = await this.utilisateurs.findOne({
@@ -278,7 +290,9 @@ export class ActionsService {
           this.recommendations.create({
             userId,
             title: `Action terrain : ${action}`,
-            message: `${nomActeur} a effectué « ${action} » sur le terrain. Consultez le journal des actions pour en savoir plus.`,
+            message: `${nomActeur} a effectué « ${action} » sur le terrain${
+              params.libelle ? ` : « ${params.libelle} »` : ''
+            }. Consultez le journal des actions pour en savoir plus.`,
             type: RecommendationType.INFO,
             priority: RecommendationPriority.LOW,
             metadata: {
@@ -287,6 +301,8 @@ export class ActionsService {
               actionType: params.actionType,
               entityType: params.entityType,
               entityId: params.entityId ?? null,
+              ...(params.canal ? { canal: params.canal } : {}),
+              ...(params.libelle ? { libelle: params.libelle } : {}),
             },
           }),
         ),
@@ -359,10 +375,19 @@ export class ActionsService {
     const rules: Array<() => Promise<void>> = [
       async () => {
         if (context.actionType === 'CREATE_PARCELLE') {
+          // « Première parcelle » : envoyée une seule fois (elle se répétait à
+          // chaque création, N-12 ; plus visible encore avec les actions en ligne).
+          const dejaEnvoyee = await this.recommendations.exists({
+            where: {
+              userId: context.userId,
+              title: TITRE_BIENVENUE_PREMIERE_PARCELLE,
+            },
+          });
+          if (dejaEnvoyee) return;
           await this.recommendations.save(
             this.recommendations.create({
               userId: context.userId,
-              title: 'Bienvenue — première parcelle créée',
+              title: TITRE_BIENVENUE_PREMIERE_PARCELLE,
               message: `Parcelle « ${this.labelOf(
                 context.payload?.nom,
               )} » créée. Pensez à délimiter la zone GPS pour calculer la superficie.`,

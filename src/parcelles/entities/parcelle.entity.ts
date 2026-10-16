@@ -57,6 +57,12 @@ export class Parcelle extends BaseEntity {
   @OneToMany('Culture', 'parcelle')
   cultures: Culture[];
 
+  /**
+   * Calculé par la liste (GET /parcelles) : nombre de cultures hors
+   * supprimées. Champ non persisté (aucun décorateur TypeORM).
+   */
+  nombreCultures?: number;
+
   @OneToMany('PointGPS', 'parcelle')
   pointsGPS: PointGPS[];
 
