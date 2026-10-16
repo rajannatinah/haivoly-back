@@ -31,6 +31,6 @@
        pas initialisées dans un constructeur. */
     "strictPropertyInitialization": false
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

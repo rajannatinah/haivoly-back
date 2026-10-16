@@ -26,6 +26,22 @@ export class Recommendation extends BaseEntity {
   @JoinColumn({ name: 'userId' })
   utilisateur: Utilisateur;
 
+  /**
+   * Émetteur de la recommandation (lot 9 — web). Nullable : les lignes
+   * antérieures au patch n'ont pas d'émetteur connu, et la suppression du
+   * compte émetteur ne supprime jamais la recommandation du destinataire.
+   */
+  @Index('Recommendation_createdById_idx')
+  @Column({ type: 'text', name: 'createdById', nullable: true })
+  createdById: string | null;
+
+  @ManyToOne(() => Utilisateur, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'createdById' })
+  createur: Utilisateur | null;
+
   @Column({ type: 'text' })
   title: string;
 

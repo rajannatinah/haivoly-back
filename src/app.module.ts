@@ -18,6 +18,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { MailModule } from './mail/mail.module';
 import { UsernameModule } from './users/username.module';
 import { ActionsModule } from './actions/actions.module';
+import { ActiviteModule } from './activite/activite.module';
 import { SynchronizationModule } from './synchronization/synchronization.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
@@ -50,6 +51,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     PhotosRecoltesModule,
     RecommendationsModule,
     ActionsModule,
+    // Activité en ligne : journal + notification du propriétaire (B-16).
+    ActiviteModule,
     SynchronizationModule,
     DashboardModule,
 

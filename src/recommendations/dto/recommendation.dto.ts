@@ -54,6 +54,11 @@ export class RecommendationQueryDto extends PaginationQueryDto {
   @IsString()
   userId?: string;
 
+  /** Filtre « Envoyées » de la vue web : recommandations créées par ce compte. */
+  @IsOptional()
+  @IsString()
+  createdById?: string;
+
   @IsOptional()
   @IsEnum(RecommendationType)
   type?: RecommendationType;

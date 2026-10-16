@@ -18,6 +18,7 @@ import { CreateInterventionDto } from '../interventions/dto/intervention.dto';
 import { CreateObservationDto } from '../observations/dto/observation.dto';
 import { CreateRecolteDto } from '../recoltes/dto/recolte.dto';
 import { parseDate } from '../common/utils/date.util';
+import { libelleEntite } from '../activite/description-requete';
 
 export type SyncActionStatus =
   'SYNCED' | 'DUPLICATE' | 'FAILED' | 'INVALID' | 'CONFLICT';
@@ -237,6 +238,8 @@ export class SynchronizationService {
           actionType: action.actionType,
           entityType: action.entityType,
           entityId: outcome.entityId ?? action.entityId ?? null,
+          canal: 'SYNC',
+          libelle: libelleEntite(action.entityType, outcome.data),
         })
         .catch((error) =>
           this.logger.warn(

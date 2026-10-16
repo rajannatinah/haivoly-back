@@ -14,7 +14,8 @@ import { UsersService } from '../users/users.service';
 import { CreateParcelleDto } from './dto/creation-parcelle.dto';
 import { UpdateParcelleDto } from './dto/modification-parcelle.dto';
 import { ModifierDelimitationDto } from './dto/delimitation.dto';
-import { StatutParcelle } from '../common/enums/domain.enums';
+import { StatutCulture, StatutParcelle } from '../common/enums/domain.enums';
+import { Culture } from '../cultures/entities/culture.entity';
 import { calculerSuperficie, centroide } from '../common/utils/geo.util';
 import {
   dedupliquer,
@@ -49,7 +50,31 @@ export class ParcellesService {
     private readonly usersService: UsersService,
     @InjectRepository(Parcelle)
     private readonly parcelles: Repository<Parcelle>,
+    @InjectRepository(Culture)
+    private readonly cultures: Repository<Culture>,
   ) {}
+
+  /**
+   * Nombre de cultures (hors supprimées) par parcelle, en UNE requête
+   * groupée : la liste mobile l'affiche sans requête par parcelle.
+   */
+  private async compterCultures(
+    parcelleIds: readonly string[],
+  ): Promise<Map<string, number>> {
+    if (parcelleIds.length === 0) return new Map();
+    const lignes = await this.cultures
+      .createQueryBuilder('culture')
+      .select('culture.parcelleId', 'parcelleId')
+      .addSelect('COUNT(*)', 'total')
+      .where('culture.parcelleId IN (:...parcelleIds)', { parcelleIds })
+      .andWhere('culture.statut != :supprimee', {
+        supprimee: StatutCulture.SUPPRIMEE,
+      })
+      .groupBy('culture.parcelleId')
+      .getRawMany<{ parcelleId: string; total: string | number }>();
+    // PostgreSQL renvoie COUNT en bigint, donc sous forme de chaîne.
+    return new Map(lignes.map((l) => [l.parcelleId, Number(l.total)]));
+  }
 
   private validerDelimitation(points: readonly Sommet[]): Sommet[] {
     if (!Array.isArray(points) || points.length < 3) {
@@ -169,6 +194,11 @@ export class ParcellesService {
     });
 
     items.forEach((parcelle) => this.sortPoints(parcelle));
+
+    const comptes = await this.compterCultures(items.map((p) => p.id));
+    items.forEach((parcelle) => {
+      parcelle.nombreCultures = comptes.get(parcelle.id) ?? 0;
+    });
 
     return paginate(items, total, page, limit);
   }
